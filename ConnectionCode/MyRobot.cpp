@@ -10,6 +10,8 @@
 #include <string.h> //memset + bzero
 #include <unistd.h> //read() and write()
 static bool start;
+static bool joystickPressed;
+static bool detectedObject;
 int SocketServer(...)
 {
 	int n;
@@ -19,23 +21,19 @@ int SocketServer(...)
 	strcpy(msg, "start");
 	struct sockaddr_in serv_addr, cli_addr;
 	static const int PORT_NUM = 4590;
-	//CTOR
+	//Socket init
 	sockfd = socket(AF_INET, SOCK_STREAM, 0);
-	printf("socket file descriptor:%d\n", sockfd);
 	
-	//reset
+	//reset + address init
 	bzero((char *) &serv_addr, sizeof(serv_addr));
 	serv_addr.sin_family = AF_INET;
 	serv_addr.sin_addr.s_addr = INADDR_ANY;
 	serv_addr.sin_port = htons(PORT_NUM);
-
+	
 	bind(sockfd, (struct sockaddr *) &serv_addr, sizeof(serv_addr));
 	listen(sockfd, 5);
 	cli_len = sizeof(cli_addr);
 	clientfd = accept(sockfd, (struct sockaddr *) &cli_addr, (int*)&cli_len);
-	//printf("new socket file descriptor:%d\n", sockfd);
-	//printf("client address:%d\n", ntohl(cli_addr.sin_addr.s_addr));
-	//printf("client port:%d\n", ntohs(cli_addr.sin_port));
 
 	while(1)	
 	{
@@ -45,11 +43,12 @@ int SocketServer(...)
 			printf("omg where is the connection #swag");
 			break;
 		}
-		//buffer[n] = '\0';
 		if(buffer[0] == '0')
 			start = true;
-		//printf("%d\n", n);
-		//printf("msg: %s\n", buffer);
+		else if(buffer[0] == '4')
+		{
+			detectedObject = true;
+		}
 		
 		
 		write(clientfd, buffer, n);
@@ -57,24 +56,33 @@ int SocketServer(...)
 	return 0;
 }
 
+#define SHOOTER_MOTOR1_PORT 5
+#define SHOOTER_MOTOR2_PORT 6
+#define CAMERA_LED_PORT 2
+
 class RobotDemo : public SimpleRobot
 {
 	RobotDrive myRobot; // robot drive system
 	Joystick stick; // only joystick
-
-	int (*f)(...);
-	Task task;	
-	
+  	int (*f)(...);
+	Task task;
+	Jaguar motor1, motor2;
+	Relay cameraLed;
 public:
 	RobotDemo(void):
 		myRobot(1, 2, 3, 4),	// these must be initialized in the same order
 		stick(1),
 		f(&SocketServer),
-		task("Server", f)
+		task("Server", f),
+		motor1(SHOOTER_MOTOR1_PORT),
+		motor2(SHOOTER_MOTOR2_PORT),
+		cameraLed(CAMERA_LED_PORT, Relay::kForwardOnly)
 		
 	{
 		myRobot.SetExpiration(0.1);
 		start = false;
+		joystickPressed = false;
+		detectedObject = false;
 	}
 
 	/**
@@ -95,14 +103,26 @@ public:
 	{
 		myRobot.SetSafetyEnabled(false);
 		task.Start();
+		cameraLed.Set(Relay::kForward);
 		while (IsOperatorControl())
 		{	
 			if(start)
 				myRobot.ArcadeDrive(stick);
+			if(stick.GetRawButton(1))
+				joystickPressed = true;
+			if(detectedObject)
+				motor1.Set(0.2f);
+				motor2.Set(0.2f);
 			Wait(0.005);
 
 		}
 	}
+	
+	void Disabled()
+	{
+		cameraLed.Set(Relay::kOff);
+	}
+	
 
 
 
